@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: thetruthmw
+    env: docker
+    repo: https://github.com/nkulawuamw-gif/thetruthmw.git
+    plan: starter
+    envVars:
+      - key: WORDPRESS_DB_HOST
+        value: your-mysql-host.example.com
+      - key: WORDPRESS_DB_USER
+        value: thetruthmw
+      - key: WORDPRESS_DB_PASSWORD
+        sync: false
+      - key: WORDPRESS_DB_NAME
+        value: thetruthmw
+      - key: WORDPRESS_TABLE_PREFIX
+        value: wp_
+      - key: WP_HOME
+        value: https://thetruthmw.onrender.com
+      - key: WP_SITEURL
+        value: https://thetruthmw.onrender.com
+      - key: WORDPRESS_CONFIG_EXTRA
+        value: |
+          define('WP_AUTO_UPDATE_CORE', false);
+          define('DISALLOW_FILE_MODS', true);
+          define('WP_POST_REVISIONS', 5);
+      - key: WP_AUTH_KEY
+        generateValue: true
+      - key: WP_SECURE_AUTH_KEY
+        generateValue: true
+      - key: WP_LOGGED_IN_KEY
+        generateValue: true
+      - key: WP_NONCE_KEY
+        generateValue: true
+      - key: WP_AUTH_SALT
+        generateValue: true
+      - key: WP_SECURE_AUTH_SALT
+        generateValue: true
+      - key: WP_LOGGED_IN_SALT
+        generateValue: true
+      - key: WP_NONCE_SALT
+        generateValue: true
+    disk:
+      name: uploads
+      mountPath: /var/www/html/wp-content/uploads
+      sizeGB: 5
