@@ -1,0 +1,40 @@
+# WordPress core
+app/public/wp-admin/
+app/public/wp-includes/
+app/public/index.php
+app/public/wp-*.php
+app/public/xmlrpc.php
+app/public/.htaccess
+app/public/license.txt
+app/public/readme.html
+app/public/wp-config-sample.php
+
+# Uploads (media files)
+app/public/wp-content/uploads/
+app/public/wp-content/blogs.dir/
+
+# 3rd party plugins (track only our custom plugin)
+app/public/wp-content/plugins/*/
+!/app/public/wp-content/plugins/thetruth-settings/
+
+# 3rd party themes (track only our modified theme)
+app/public/wp-content/themes/*/
+!/app/public/wp-content/themes/twentytwentyfive/
+
+# Cache, temp, upgrade
+app/public/wp-content/cache/
+app/public/wp-content/upgrade/
+
+# Languages
+app/public/wp-content/languages/
+
+# Local by Flywheel config
+conf/
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
