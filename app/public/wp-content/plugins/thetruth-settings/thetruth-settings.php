@@ -29,10 +29,15 @@ class TheTruthSettings
 
     private function __construct()
     {
+        @ini_set('upload_max_filesize', '256M');
+        @ini_set('post_max_size', '256M');
+        @ini_set('max_execution_time', '300');
+        @ini_set('max_input_time', '300');
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('wp_head', [$this, 'output_custom_styles'], 100);
+        add_action('wp_head', [$this, 'output_ad_script'], 1);
         add_action('wp_head', [$this, 'output_news_schema'], 1);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
         add_action('after_setup_theme', [$this, 'set_custom_logo'], 5);
@@ -52,6 +57,45 @@ class TheTruthSettings
         add_shortcode('tts_category_filter', [$this, 'category_filter_shortcode']);
         add_shortcode('tts_trending_posts', [$this, 'trending_posts_shortcode']);
         add_shortcode('tts_audio_section', [$this, 'audio_section_shortcode']);
+        add_action('add_meta_boxes', [$this, 'add_video_meta_box']);
+        add_action('save_post', [$this, 'save_video_meta']);
+        add_action('edit_form_after_editor', [$this, 'render_video_below_editor']);
+        add_shortcode('tts_video_section', [$this, 'video_section_shortcode']);
+        add_shortcode('tts_media_section', [$this, 'media_section_shortcode']);
+        add_shortcode('tts_header_ads', [$this, 'header_ads_shortcode']);
+        add_filter('the_content', [$this, 'append_video_audio_to_content']);
+        add_filter('wp_handle_upload_prefilter', [$this, 'sanitize_upload_filename']);
+        add_filter('wp_insert_attachment_data', [$this, 'sanitize_attachment_data'], 10, 2);
+        add_filter('upload_size_limit', [$this, 'increase_upload_limit']);
+    }
+
+    public function sanitize_upload_filename($file)
+    {
+        $name = pathinfo($file['name'], PATHINFO_FILENAME);
+        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $name = sanitize_file_name($name);
+        if (strlen($name) > 80) {
+            $name = substr($name, 0, 80);
+        }
+        $name = rtrim($name, '.-_');
+        $file['name'] = $name . '.' . $ext;
+        return $file;
+    }
+
+    public function sanitize_attachment_data($data, $postarr)
+    {
+        if (isset($data['post_title']) && strlen($data['post_title']) > 100) {
+            $data['post_title'] = substr($data['post_title'], 0, 100);
+        }
+        if (isset($data['post_name']) && strlen($data['post_name']) > 180) {
+            $data['post_name'] = substr($data['post_name'], 0, 180);
+        }
+        return $data;
+    }
+
+    public function increase_upload_limit($size)
+    {
+        return 256 * MB_IN_BYTES;
     }
 
     public function add_admin_menu()
@@ -72,7 +116,7 @@ class TheTruthSettings
                 'tts_site_name' => ['type' => 'string', 'default' => ''],
                 'tts_site_tagline' => ['type' => 'string', 'default' => ''],
                 'tts_site_logo' => ['type' => 'integer', 'default' => 0],
-                'tts_header_ads' => ['type' => 'string', 'default' => '[]', 'sanitize' => [$this, 'sanitize_header_ads']],
+                'tts_header_ads' => ['type' => 'string', 'default' => '[]', 'sanitize' => [$this, 'sanitize_header_ads'], 'show_in_rest' => false],
             ],
             'news_settings' => [
                 'tts_posts_per_category' => ['type' => 'integer', 'default' => 5],
@@ -171,23 +215,9 @@ class TheTruthSettings
         wp_localize_script('tts-admin', 'ttsAdmin', [
             'title' => __('Select Logo', 'thetruth-settings'),
             'button' => __('Use as Logo', 'thetruth-settings'),
-            'remove' => __('Remove', 'thetruth-settings'),
-            'placeholder' => __('Paste ad HTML or code here...', 'thetruth-settings'),
         ]);
 
-        wp_add_inline_script('tts-admin', '
-jQuery(function($) {
-    var container = $("#tts-ads-container");
-    $("#tts-add-ad").on("click", function() {
-        var row = $(\'<div class="tts-ad-row"><textarea name="tts_header_ads[]" rows="3" class="large-text code tts-ad-textarea" placeholder="\' + ttsAdmin.placeholder + \'"></textarea><button type="button" class="button tts-remove-ad">\' + ttsAdmin.remove + \'</button></div>\');
-        container.append(row);
-        row.find(".tts-remove-ad").on("click", function() { $(this).closest(".tts-ad-row").remove(); });
-    });
-    container.on("click", ".tts-remove-ad", function() {
-        $(this).closest(".tts-ad-row").remove();
-    });
-});
-');
+
     }
 
     public function render_settings_page()
@@ -316,16 +346,41 @@ jQuery(function($) {
                                 foreach ($ads as $i => $ad) :
                                 ?>
                                 <div class="tts-ad-row">
-                                    <textarea name="tts_header_ads[]"
-                                              rows="3"
+                                    <textarea rows="3"
                                               class="large-text code tts-ad-textarea"
                                               placeholder="<?php _e('Paste ad HTML or code here...', 'thetruth-settings'); ?>"><?php echo esc_textarea($ad); ?></textarea>
                                     <button type="button" class="button tts-remove-ad" <?php echo $i === 0 ? 'style="display:none"' : ''; ?>><?php _e('Remove', 'thetruth-settings'); ?></button>
                                 </div>
                                 <?php endforeach; ?>
                             </div>
+                            <input type="hidden" name="tts_header_ads" id="tts_header_ads" value="<?php echo esc_attr(get_option('tts_header_ads', '[]')); ?>" />
                             <button type="button" class="button" id="tts-add-ad"><?php _e('+ Add Another Ad', 'thetruth-settings'); ?></button>
                             <p class="description"><?php _e('One ad is shown per day, rotating through your list. Accepts HTML.', 'thetruth-settings'); ?></p>
+                            <script>
+                            jQuery(function($) {
+                                var container = $('#tts-ads-container');
+                                var hidden = $('#tts_header_ads');
+                                function sync() {
+                                    var ads = [];
+                                    container.find('.tts-ad-textarea').each(function() {
+                                        var val = $(this).val().trim();
+                                        if (val) ads.push(val);
+                                    });
+                                    hidden.val(ads.length ? JSON.stringify(ads) : '[]');
+                                }
+                                container.on('input', '.tts-ad-textarea', sync);
+                                $('#tts-add-ad').on('click', function() {
+                                    var row = $('<div class="tts-ad-row"><textarea rows="3" class="large-text code tts-ad-textarea" placeholder="<?php _e('Paste ad HTML or code here...', 'thetruth-settings'); ?>"></textarea><button type="button" class="button tts-remove-ad"><?php _e('Remove', 'thetruth-settings'); ?></button></div>');
+                                    row.find('.tts-remove-ad').on('click', function() { $(this).closest('.tts-ad-row').remove(); sync(); });
+                                    container.append(row);
+                                    sync();
+                                });
+                                container.on('click', '.tts-remove-ad', function() {
+                                    $(this).closest('.tts-ad-row').remove();
+                                    sync();
+                                });
+                            });
+                            </script>
                         </td>
                     </tr>
                 </table>
@@ -554,7 +609,11 @@ jQuery(function($) {
 
         $css = ':root {' . "\n";
         foreach ($colors as $property => $cfg) {
-            $css .= '    ' . $property . ': ' . esc_attr(get_option($cfg['key'], $cfg['default'])) . ';' . "\n";
+            $value = get_option($cfg['key'], $cfg['default']);
+            if (empty($value)) {
+                $value = $cfg['default'];
+            }
+            $css .= '    ' . $property . ': ' . esc_attr($value) . ';' . "\n";
         }
         $css .= '}' . "\n";
 
@@ -708,6 +767,125 @@ jQuery(function($) {
         return is_array($ads) ? $ads : [];
     }
 
+    private function format_ad($raw)
+    {
+        $trimmed = trim($raw);
+        if (strpos($trimmed, '<') !== false) {
+            return wp_kses_post($trimmed);
+        }
+        if (preg_match('#^https?://\S+\.(jpe?g|png|gif|webp)(\?.*)?$#i', $trimmed)) {
+            return '<img src="' . esc_url($trimmed) . '" alt="ad" />';
+        }
+        if (preg_match('#^https?://\S+\.(mp4|webm|ogg|mov)(\?.*)?$#i', $trimmed)) {
+            return '<video src="' . esc_url($trimmed) . '" autoplay muted loop playsinline></video>';
+        }
+        return esc_url($trimmed);
+    }
+
+    public function output_ad_script()
+    {
+        ?>
+        <script>
+        function ttsAdClick(e) {
+            var ad = e.currentTarget;
+            e.preventDefault();
+            var link = ad.querySelector("a");
+            if (link && link.href) {
+                window.location.href = link.href;
+                return;
+            }
+            var img = ad.querySelector("img");
+            if (img && img.src) {
+                window.open(img.src, "_blank");
+            }
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var ads = document.querySelectorAll('.tts-header-ad');
+            ads.forEach(function(container) {
+                var slides = container.querySelectorAll('.tts-header-ad-slide');
+                if (slides.length === 0) return;
+                slides[0].classList.add('active');
+                var v = slides[0].querySelector('video');
+                if (v) { v.currentTime = 0; v.play(); }
+                if (slides.length < 2) return;
+                var idx = 0;
+                setInterval(function() {
+                    var oldV = slides[idx].querySelector('video');
+                    if (oldV) { oldV.pause(); oldV.currentTime = 0; }
+                    slides[idx].classList.remove('active');
+                    idx = (idx + 1) % slides.length;
+                    slides[idx].classList.add('active');
+                    var newV = slides[idx].querySelector('video');
+                    if (newV) { newV.currentTime = 0; newV.play(); }
+                }, 6000);
+            });
+        });
+        (function() {
+            var input = document.querySelector('.wp-block-search input[type="search"]');
+            if (!input) return;
+            var wrap = input.closest('.wp-block-search') || input.parentElement;
+            var box = document.createElement('div');
+            box.className = 'tts-search-results';
+            box.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;max-height:360px;overflow-y:auto;z-index:99999;';
+            wrap.style.position = 'relative';
+            wrap.appendChild(box);
+            var timer;
+            input.addEventListener('input', function() {
+                clearTimeout(timer);
+                var q = input.value.trim();
+                if (q.length < 2) { box.style.display = 'none'; return; }
+                timer = setTimeout(function() {
+                    fetch('/wp-json/wp/v2/posts?search=' + encodeURIComponent(q) + '&per_page=8&_fields=title,id')
+                        .then(function(r) { return r.json(); })
+                        .then(function(posts) {
+                            if (!posts.length || !Array.isArray(posts)) { box.style.display = 'none'; return; }
+                            var origin = window.location.origin;
+                            box.innerHTML = '';
+                            posts.forEach(function(p) {
+                                var id = p.id;
+                                if (!id) return;
+                                var d = document.createElement('div');
+                                var title = p.title && p.title.rendered ? p.title.rendered : '(no title)';
+                                d.textContent = title;
+                                d.style.cssText = 'display:block;padding:10px 14px;color:#333;font-size:14px;border-bottom:1px solid #eee;cursor:pointer;';
+                                d.addEventListener('mouseenter', function(){this.style.background='#f5f5f5';});
+                                d.addEventListener('mouseleave', function(){this.style.background='';});
+                                (function(postId) {
+                                    d.addEventListener('click', function(e) {
+                                        e.stopPropagation();
+                                        window.location.href = origin + '/?p=' + postId;
+                                    });
+                                })(id);
+                                box.appendChild(d);
+                            });
+                            box.style.display = 'block';
+                        })
+                        .catch(function() { box.style.display = 'none'; });
+                }, 300);
+            });
+            document.addEventListener('click', function(e) {
+                if (!wrap.contains(e.target)) box.style.display = 'none';
+            });
+        })();
+        </script>
+        <?php
+    }
+
+    public function header_ads_shortcode()
+    {
+        $ads = $this->get_header_ads();
+        if (empty($ads)) {
+            return '';
+        }
+        $output = '<div class="tts-header-ad" onclick="ttsAdClick(event)">';
+        $output .= '<div class="tts-header-ad-track">';
+        foreach ($ads as $ad) {
+            $output .= '<div class="tts-header-ad-slide">' . $this->format_ad($ad) . '</div>';
+        }
+        $output .= '</div></div>';
+        return $output;
+    }
+
     public function logo_shortcode($atts)
     {
         $logo_id = (int) get_option('tts_site_logo', 0);
@@ -756,22 +934,6 @@ jQuery(function($) {
         wp_localize_script('tts-search-suggest', 'wpRestController', [
             'url' => rest_url(),
         ]);
-
-        wp_add_inline_script('tts-search-suggest', '
-function ttsAdClick(e) {
-    var ad = e.currentTarget;
-    e.preventDefault();
-    var link = ad.querySelector("a");
-    if (link && link.href) {
-        window.location.href = link.href;
-        return;
-    }
-    var img = ad.querySelector("img");
-    if (img && img.src) {
-        window.open(img.src, "_blank");
-    }
-}
-');
 
         wp_enqueue_script(
             'tts-news-box',
@@ -932,11 +1094,11 @@ function ttsAdClick(e) {
             return;
         }
 
-        $has_audio = isset($_POST['tts_has_audio']) ? 1 : 0;
-        update_post_meta($post_id, '_tts_has_audio', $has_audio);
-
         $audio_id = isset($_POST['tts_audio_id']) ? (int) $_POST['tts_audio_id'] : 0;
         update_post_meta($post_id, '_tts_audio_id', $audio_id);
+
+        $has_audio = isset($_POST['tts_has_audio']) ? 1 : ($audio_id > 0 ? 1 : 0);
+        update_post_meta($post_id, '_tts_has_audio', $has_audio);
     }
 
     public function render_audio_below_editor($post)
@@ -1034,8 +1196,11 @@ function ttsAdClick(e) {
         $posts = get_posts([
             'post_type' => 'post',
             'posts_per_page' => $atts['count'],
-            'meta_key' => '_tts_has_audio',
-            'meta_value' => '1',
+            'meta_query' => [
+                'relation' => 'OR',
+                ['key' => '_tts_has_audio', 'value' => '1'],
+                ['key' => '_tts_audio_id', 'value' => '0', 'compare' => '>', 'type' => 'NUMERIC'],
+            ],
             'orderby' => 'date',
             'order' => 'DESC',
         ]);
@@ -1051,7 +1216,6 @@ function ttsAdClick(e) {
         foreach ($posts as $post) {
             $audio_id = (int) get_post_meta($post->ID, '_tts_audio_id', true);
             $audio_url = $audio_id ? wp_get_attachment_url($audio_id) : '';
-            $audio_mime = $audio_id ? get_post_mime_type($audio_id) : '';
             $cats = get_the_category($post->ID);
             $cat_html = '';
             if (!empty($cats)) {
@@ -1064,14 +1228,313 @@ function ttsAdClick(e) {
             $output .= '<div class="tts-audio-meta">' . $cat_html . ' <span class="tts-audio-date">' . get_the_date(get_option('date_format'), $post->ID) . '</span></div>';
             $output .= '</div>';
             if ($audio_url) {
-                $type_attr = $audio_mime ? ' type="' . esc_attr($audio_mime) . '"' : '';
-                $output .= '<div class="tts-audio-player"><audio controls preload="none" style="width:100%;height:40px;"><source src="' . esc_url($audio_url) . '"' . $type_attr . '></audio></div>';
+                $output .= '<div class="tts-audio-player">' . wp_audio_shortcode(['src' => $audio_url]) . '</div>';
             }
             $output .= '</div>';
         }
 
         $output .= '</div></div>';
         return $output;
+    }
+
+    // ─── Video Meta Box ────────────────────────────────────────────
+
+    public function add_video_meta_box()
+    {
+        add_meta_box(
+            'tts_video',
+            __('Upload Video Here', 'thetruth-settings'),
+            [$this, 'render_video_meta_box'],
+            'post',
+            'normal',
+            'default'
+        );
+    }
+
+    public function render_video_meta_box($post)
+    {
+        wp_nonce_field('tts_video_nonce', 'tts_video_nonce');
+        $video_id = (int) get_post_meta($post->ID, '_tts_video_id', true);
+        $video_url = $video_id ? wp_get_attachment_url($video_id) : '';
+        ?>
+        <style>
+        #tts_video .inside { padding: 16px; }
+        #tts_video .tts-video-checkbox { margin-bottom: 12px; }
+        #tts_video .tts-video-checkbox label { font-weight: 600; font-size: 14px; }
+        #tts_video .tts-video-checkbox input[type="checkbox"] { width: 18px; height: 18px; margin-right: 6px; }
+        #tts_video .tts-video-preview video { width: 100%; max-height: 200px; margin-bottom: 8px; background: #000; }
+        #tts_video .button { padding: 8px 20px; font-size: 13px; height: auto; line-height: 1.4; }
+        #tts_video .description { font-size: 12px; margin-top: 10px; }
+        </style>
+        <div class="tts-video-checkbox">
+            <label>
+                <input type="checkbox" name="tts_has_video" value="1" <?php checked(get_post_meta($post->ID, '_tts_has_video', true), 1); ?> />
+                <?php _e('This post has video', 'thetruth-settings'); ?>
+            </label>
+        </div>
+        <div class="tts-video-upload">
+            <div class="tts-video-preview" id="tts-video-preview" style="<?php echo $video_url ? '' : 'display:none;'; ?>">
+                <video controls style="width:100%;max-height:200px;background:#000;">
+                    <source src="<?php echo esc_url($video_url); ?>" />
+                </video>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="button button-primary" id="tts-upload-video"><?php _e('Upload / Choose Video File', 'thetruth-settings'); ?></button>
+                <button type="button" class="button" id="tts-remove-video" style="<?php echo $video_id ? '' : 'display:none;'; ?>"><?php _e('Remove Video', 'thetruth-settings'); ?></button>
+            </div>
+            <input type="hidden" name="tts_video_id" id="tts_video_id" value="<?php echo esc_attr($video_id); ?>" />
+        </div>
+        <p class="description"><?php _e('Upload a video file (MP4, WEBM, OGV). The player will appear in the Video Clips section on the front page.', 'thetruth-settings'); ?></p>
+        <script>
+        jQuery(function($) {
+            var videoFrame;
+            $('#tts-upload-video').on('click', function(e) {
+                e.preventDefault();
+                if (videoFrame) { videoFrame.open(); return; }
+                videoFrame = wp.media({
+                    title: '<?php _e('Select Video', 'thetruth-settings'); ?>',
+                    button: { text: '<?php _e('Use as Video', 'thetruth-settings'); ?>' },
+                    multiple: false,
+                    library: { type: 'video' },
+                });
+                videoFrame.on('select', function() {
+                    var attachment = videoFrame.state().get('selection').first().toJSON();
+                    $('#tts_video_id').val(attachment.id);
+                    var $preview = $('#tts-video-preview');
+                    $preview.html('<video controls style="width:100%;max-height:200px;background:#000;"><source src="' + attachment.url + '" /></video>').show();
+                    $('#tts-remove-video').show();
+                });
+                videoFrame.open();
+            });
+            $('#tts-remove-video').on('click', function(e) {
+                e.preventDefault();
+                $('#tts_video_id').val('');
+                $('#tts-video-preview').hide().empty();
+                $(this).hide();
+            });
+        });
+        </script>
+        <?php
+    }
+
+    public function save_video_meta($post_id)
+    {
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+        if (!isset($_POST['tts_video_nonce']) || !wp_verify_nonce($_POST['tts_video_nonce'], 'tts_video_nonce')) {
+            return;
+        }
+        if (!current_user_can('edit_post', $post_id)) {
+            return;
+        }
+
+        $video_id = isset($_POST['tts_video_id']) ? (int) $_POST['tts_video_id'] : 0;
+        update_post_meta($post_id, '_tts_video_id', $video_id);
+
+        $has_video = isset($_POST['tts_has_video']) ? 1 : ($video_id > 0 ? 1 : 0);
+        update_post_meta($post_id, '_tts_has_video', $has_video);
+    }
+
+    public function render_video_below_editor($post)
+    {
+        if ('post' !== $post->post_type) {
+            return;
+        }
+        $video_id = (int) get_post_meta($post->ID, '_tts_video_id', true);
+        $video_url = $video_id ? wp_get_attachment_url($video_id) : '';
+        wp_nonce_field('tts_video_nonce', 'tts_video_nonce');
+        ?>
+        <div id="tts-video-editor-section" style="margin:20px 0;padding:16px;background:#f0f0f1;border:1px solid #c3c4c7;border-radius:4px;">
+            <h2 style="margin-top:0;font-size:16px;font-weight:600;"><?php _e('Upload Video Here', 'thetruth-settings'); ?></h2>
+            <p style="margin-bottom:12px;">
+                <label>
+                    <input type="checkbox" name="tts_has_video" value="1" <?php checked(get_post_meta($post->ID, '_tts_has_video', true), 1); ?> />
+                    <?php _e('This post has video', 'thetruth-settings'); ?>
+                </label>
+            </p>
+            <div class="tts-video-preview" id="tts-video-preview" style="<?php echo $video_url ? '' : 'display:none;'; ?>margin-bottom:8px;">
+                <video controls style="width:100%;max-height:200px;background:#000;">
+                    <source src="<?php echo esc_url($video_url); ?>" />
+                </video>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <button type="button" class="button button-primary" id="tts-upload-video"><?php _e('Upload / Choose Video File', 'thetruth-settings'); ?></button>
+                <button type="button" class="button" id="tts-remove-video" style="<?php echo $video_id ? '' : 'display:none;'; ?>"><?php _e('Remove Video', 'thetruth-settings'); ?></button>
+                <input type="hidden" name="tts_video_id" id="tts_video_id" value="<?php echo esc_attr($video_id); ?>" />
+                <span style="margin-left:8px;color:#888;font-size:12px;"><?php _e('MP4, WEBM, OGV', 'thetruth-settings'); ?></span>
+            </div>
+        </div>
+        <script>
+        jQuery(function($) {
+            var videoFrame;
+            $('#tts-upload-video').on('click', function(e) {
+                e.preventDefault();
+                if (videoFrame) { videoFrame.open(); return; }
+                videoFrame = wp.media({
+                    title: '<?php _e('Select Video', 'thetruth-settings'); ?>',
+                    button: { text: '<?php _e('Use as Video', 'thetruth-settings'); ?>' },
+                    multiple: false,
+                    library: { type: 'video' },
+                });
+                videoFrame.on('select', function() {
+                    var attachment = videoFrame.state().get('selection').first().toJSON();
+                    $('#tts_video_id').val(attachment.id);
+                    var $preview = $('#tts-video-preview');
+                    $preview.html('<video controls style="width:100%;max-height:200px;background:#000;"><source src="' + attachment.url + '" /></video>').show();
+                    $('#tts-remove-video').show();
+                });
+                videoFrame.open();
+            });
+            $('#tts-remove-video').on('click', function(e) {
+                e.preventDefault();
+                $('#tts_video_id').val('');
+                $('#tts-video-preview').hide().empty();
+                $(this).hide();
+            });
+        });
+        </script>
+        <?php
+    }
+
+    public function video_section_shortcode($atts)
+    {
+        $atts = shortcode_atts([
+            'count' => 5,
+            'title' => __('Video Clips', 'thetruth-settings'),
+        ], $atts);
+
+        $posts = get_posts([
+            'post_type' => 'post',
+            'posts_per_page' => $atts['count'],
+            'meta_query' => [
+                'relation' => 'OR',
+                ['key' => '_tts_has_video', 'value' => '1'],
+                ['key' => '_tts_video_id', 'value' => '0', 'compare' => '>', 'type' => 'NUMERIC'],
+            ],
+            'orderby' => 'date',
+            'order' => 'DESC',
+        ]);
+
+        if (empty($posts)) {
+            return '';
+        }
+
+        $output = '<div class="tts-video-section">';
+        $output .= '<h2 class="tts-video-title">' . esc_html($atts['title']) . '</h2>';
+        $output .= '<div class="tts-video-list">';
+
+        foreach ($posts as $post) {
+            $video_id = (int) get_post_meta($post->ID, '_tts_video_id', true);
+            $video_url = $video_id ? wp_get_attachment_url($video_id) : '';
+            $cats = get_the_category($post->ID);
+            $cat_html = '';
+            if (!empty($cats)) {
+                $cat_html = '<span class="tts-video-cat">' . esc_html($cats[0]->name) . '</span>';
+            }
+
+            $output .= '<div class="tts-video-item">';
+            $output .= '<div class="tts-video-info">';
+            $output .= '<h3 class="tts-video-headline"><a href="' . esc_url(get_permalink($post->ID)) . '">' . esc_html(get_the_title($post->ID)) . '</a></h3>';
+            $output .= '<div class="tts-video-meta">' . $cat_html . ' <span class="tts-video-date">' . get_the_date(get_option('date_format'), $post->ID) . '</span></div>';
+            $output .= '</div>';
+            if ($video_url) {
+                $output .= '<div class="tts-video-player">' . wp_video_shortcode(['src' => $video_url]) . '</div>';
+            }
+            $output .= '</div>';
+        }
+
+        $output .= '</div></div>';
+        return $output;
+    }
+
+    public function media_section_shortcode($atts)
+    {
+        $atts = shortcode_atts([
+            'count' => 20,
+            'title' => __('Video and Audio Section', 'thetruth-settings'),
+        ], $atts);
+
+        $posts = get_posts([
+            'post_type' => 'post',
+            'posts_per_page' => $atts['count'],
+            'meta_query' => [
+                'relation' => 'OR',
+                ['key' => '_tts_has_video', 'value' => '1'],
+                ['key' => '_tts_video_id', 'value' => '0', 'compare' => '>', 'type' => 'NUMERIC'],
+                ['key' => '_tts_has_audio', 'value' => '1'],
+                ['key' => '_tts_audio_id', 'value' => '0', 'compare' => '>', 'type' => 'NUMERIC'],
+            ],
+            'orderby' => 'date',
+            'order' => 'DESC',
+        ]);
+
+        if (empty($posts)) {
+            return '';
+        }
+
+        $output = '<div class="tts-media-section">';
+        $output .= '<h2 class="tts-media-title">' . esc_html($atts['title']) . '</h2>';
+        $output .= '<div class="tts-media-list">';
+
+        foreach ($posts as $post) {
+            $video_id = (int) get_post_meta($post->ID, '_tts_video_id', true);
+            $video_url = $video_id ? wp_get_attachment_url($video_id) : '';
+            $audio_id = (int) get_post_meta($post->ID, '_tts_audio_id', true);
+            $audio_url = $audio_id ? wp_get_attachment_url($audio_id) : '';
+            $cats = get_the_category($post->ID);
+            $cat_html = '';
+            if (!empty($cats)) {
+                $cat_html = '<span class="tts-media-cat">' . esc_html($cats[0]->name) . '</span>';
+            }
+
+            $output .= '<div class="tts-media-item">';
+            $output .= '<div class="tts-media-info">';
+            $output .= '<h3 class="tts-media-headline"><a href="' . esc_url(get_permalink($post->ID)) . '">' . esc_html(get_the_title($post->ID)) . '</a></h3>';
+            $output .= '<div class="tts-media-meta">' . $cat_html . ' <span class="tts-media-date">' . get_the_date(get_option('date_format'), $post->ID) . '</span></div>';
+            $output .= '</div>';
+            if ($video_url) {
+                $output .= '<div class="tts-media-player">' . wp_video_shortcode(['src' => $video_url]) . '</div>';
+            } elseif ($audio_url) {
+                $output .= '<div class="tts-media-player">' . wp_audio_shortcode(['src' => $audio_url]) . '</div>';
+            }
+            $output .= '</div>';
+        }
+
+        $output .= '</div></div>';
+        return $output;
+    }
+
+    public function append_video_audio_to_content($content)
+    {
+        if (!is_singular('post') || !in_the_loop() || !is_main_query()) {
+            return $content;
+        }
+
+        $post_id = get_the_ID();
+        $extra = '';
+
+        $video_id = (int) get_post_meta($post_id, '_tts_video_id', true);
+        if ($video_id) {
+            $video_url = wp_get_attachment_url($video_id);
+            if ($video_url) {
+                $extra .= '<div class="tts-single-video" style="margin:24px 0;">' . wp_video_shortcode(['src' => $video_url]) . '</div>';
+            }
+        }
+
+        $audio_id = (int) get_post_meta($post_id, '_tts_audio_id', true);
+        if ($audio_id) {
+            $audio_url = wp_get_attachment_url($audio_id);
+            if ($audio_url) {
+                $extra .= '<div class="tts-single-audio" style="margin:24px 0;">' . wp_audio_shortcode(['src' => $audio_url]) . '</div>';
+            }
+        }
+
+        if ($extra) {
+            $content .= $extra;
+        }
+
+        return $content;
     }
 
     private function render_news_settings_tab()
@@ -1154,6 +1617,16 @@ function ttsAdClick(e) {
                             <td><code>[tts_trending_posts]</code></td>
                             <td><?php _e('Displays a numbered list of trending/recent posts.', 'thetruth-settings'); ?></td>
                             <td><code>[tts_trending_posts count="5"]</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>[tts_audio_section]</code></td>
+                            <td><?php _e('Displays a list of posts with audio players.', 'thetruth-settings'); ?></td>
+                            <td><code>[tts_audio_section count="5" title="Audio"]</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>[tts_video_section]</code></td>
+                            <td><?php _e('Displays a list of posts with video players.', 'thetruth-settings'); ?></td>
+                            <td><code>[tts_video_section count="5" title="Videos"]</code></td>
                         </tr>
                     </tbody>
                 </table>

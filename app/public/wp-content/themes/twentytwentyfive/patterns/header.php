@@ -33,20 +33,9 @@
 			<!-- /wp:group -->
 		</div>
 		<!-- /wp:group -->
-		<!-- HEADER ADS CAROUSEL -->
-		<?php $tts_ads = TheTruthSettings::instance()->get_header_ads(); if (!empty($tts_ads)) : ?>
-		<div class="tts-header-ad" onclick="ttsAdClick(event)">
-			<div class="tts-header-ad-track">
-				<?php foreach ($tts_ads as $ad) : ?>
-				<div class="tts-header-ad-slide"><?php echo $ad; ?></div>
-				<?php endforeach; ?>
-				<?php foreach ($tts_ads as $ad) : ?>
-				<div class="tts-header-ad-slide"><?php echo $ad; ?></div>
-				<?php endforeach; ?>
-			</div>
-		</div>
-		<?php endif; ?>
-		<!-- /HEADER ADS CAROUSEL -->
+
+		<?php echo do_shortcode('[tts_header_ads]'); ?>
+
 		<!-- wp:navigation {"overlayBackgroundColor":"base","overlayTextColor":"contrast","style":{"spacing":{"blockGap":"var:preset|spacing|40","margin":{"top":"var:preset|spacing|20"}}},"layout":{"type":"flex","justifyContent":"left","flexWrap":"wrap"}} -->
 			<!-- wp:navigation-link {"label":"<?php esc_html_e( 'Home', 'twentytwentyfive' ); ?>","url":"/","kind":"custom","isTopLevelLink":true} /-->
 			<!-- wp:navigation-link {"label":"<?php esc_html_e( 'Politics', 'twentytwentyfive' ); ?>","url":"/category/politics/","kind":"custom","isTopLevelLink":true} /-->
